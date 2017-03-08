@@ -51,7 +51,7 @@ public:
 	}
 
 	void imageCb(const sensor_msgs::ImageConstPtr& msg){
-//		ROS_INFO("callback:");
+		//ROS_INFO("callback:");
 		cv_bridge::CvImageConstPtr cv_ptr;
 		try{
 			cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
@@ -90,11 +90,12 @@ public:
 			gettimeofday(&t2, NULL);
 			elapsedTime = (t2.tv_sec - t1.tv_sec)*1000;      // sec to ms
 			elapsedTime += (t2.tv_usec - t1.tv_usec)/1000;   // us to ms
-		}
+		} 
+
 
 
 		pixelpos_pub_.publish(pixelpos);
-//		ROS_INFO("publish:");
+		//ROS_INFO("publish:");
 	}
 };
 

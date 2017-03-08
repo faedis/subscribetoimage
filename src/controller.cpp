@@ -18,11 +18,11 @@ receives waitkey and serves as interface for setting the PID, writing data etc.
 #include <iomanip>
 #include <vector>
 
-/*
+
 //Specific input signal
 std::vector<double> uprbs;
 int prbscount = 0;
-*/
+
 
 class ControlAndMap{
 	ros::NodeHandle nh_;
@@ -67,6 +67,10 @@ std::vector<double> panposVec;
 std::vector<double> tiltposVec;
 std::vector<double> targetX;
 std::vector<double> targetY;
+// additional!!!
+std::vector<double> timePosVec;
+//additional end!!!
+
 int key = -1;
 double 
 pixelX = 0,				// local error pan in pixel
@@ -100,89 +104,120 @@ public:
 	~ControlAndMap(){
 	}
 	void pixelposCb(const geometry_msgs::Pose2D::ConstPtr& pixelpos){
-		pixelX = pixelpos->x;
-		pixelY = pixelpos->y;
-		// assign errors
-		oeX = eX;
-		oeY = eY;
-		eX = -alphaX * (double)(pixelX - hWidth) / (double)hWidth;
-		eY = -alphaY * (double)(pixelY - hHeight) / (double)hHeight;
-		// update and publish target position if all information has arrvied
-		errorarrived = true;
-		if(ptuposarrived){ 
-			rX = yX + eX;
-			rY = yY + eY;
-			errorarrived = false, ptuposarrived = false;
-			targetpos.x = rX;
-			targetpos.y = rY;
-			targetpos.theta = 0;
-			targetpos_pub_.publish(targetpos);
-		}
-		if(PTUctrl){
-			gettimeofday(&t2, NULL);
-			elapsedTime = (t2.tv_sec - t1.tv_sec)*1000;      // sec to ms
-			elapsedTime += (t2.tv_usec - t1.tv_usec)/1000;   // us to ms
-			if(firstloop){	// input without integrator and differentiator in rad
-				uXrad = Kp*eX;
-				uYrad = Kp*eY;
-				firstloop = false;
+		if(ptuposarrived){
+			pixelX = pixelpos->x;
+			pixelY = pixelpos->y;
+			// assign errors
+			oeX = eX;
+			oeY = eY;
+			eX = -alphaX * (double)(pixelX - hWidth) / (double)hWidth;
+			eY = -alphaY * (double)(pixelY - hHeight) / (double)hHeight;
+			// update and publish target position if all information has arrvied
+			errorarrived = true;
+			if(ptuposarrived){ 
+				rX = yX + eX;
+				rY = yY + eY;
+				errorarrived = false, ptuposarrived = false;
+				targetpos.x = rX;
+				targetpos.y = rY;
+				targetpos.theta = 0;
+				targetpos_pub_.publish(targetpos);
 			}
-			else{			// full input in rad
-				uXrad = Kp*eX + Ki*ieX + Kd*(eX-oeX)/dt;
-				uYrad = Kp*eY + Ki*ieY + Kd*(eY-oeY)/dt;
-			}
-			ieX += eX*dt, ieY+= eY*dt; // update integral
-			//////////////////////////////////
-			//specific input signal
-			/*
-			if(prbscount<uprbs.size()){
-				uXrad = uprbs[prbscount];
-				uYrad = 0;
+			if(PTUctrl){
+				gettimeofday(&t2, NULL);
+				elapsedTime = (t2.tv_sec - t1.tv_sec)*1000;      // sec to ms
+				elapsedTime += (t2.tv_usec - t1.tv_usec)/1000;   // us to ms
+				if(firstloop){	// input without integrator and differentiator in rad
+					uXrad = Kp*eX;
+					uYrad = Kp*eY;
+					firstloop = false;
+				}
+				else{			// full input in rad
+					uXrad = Kp*eX + Ki*ieX + Kd*(eX-oeX)/dt;
+					uYrad = Kp*eY + Ki*ieY + Kd*(eY-oeY)/dt;
+				}
+				ieX += eX*dt, ieY+= eY*dt; // update integral
+				//////////////////////////////////
+				//specific input signal
+/*		
+				if(prbscount<uprbs.size()){
+					uXrad = uprbs[prbscount];
+					uYrad = uprbs[prbscount];
+				}
+				else{
+					uXrad = 0;
+					uYrad = 0;
+				}
+				prbscount++;
+*/			
+				//////////////////////////////////
+
+				uX = uXrad/pRes;
+				uY = uYrad/tRes;
+			
+
+
+				if(abs(uX)<uXmin){
+					if(abs(pixelX-hWidth)>tolerance){//
+						uX = copysign(uXmin,uX);
+					}
+					else uX = 0;
+				}
+				else if(abs(uX>uXmax)){
+					uX = copysign(uXmax,uX);
+				}
+				if(abs(uY)<uYmin){
+					if(abs(pixelY-hHeight)>tolerance){//
+						uY = copysign(uYmin,uY);
+					}
+				else uY = 0;
+				}
+				else if(abs(uY>uYmax)){
+					uY = copysign(uYmax,uY);
+				}
+
+				ptucmd.x = round(uX); //floor
+				ptucmd.y = round(uY); //floor
+				ptucmd.theta = 0;
+				ptucmd_pub_.publish(ptucmd);
+//				ROS_INFO("cmd");
+				if(collectdata){
+					timeVec.push_back(elapsedTime);
+					exVec.push_back(eX);
+					eyVec.push_back(eY);
+					uxVec.push_back(uX*pRes);
+					uyVec.push_back(uY*tRes);
+					ixVec.push_back(ieX*Ki);
+					iyVec.push_back(ieY*Ki);
+					dxVec.push_back(Kd*(eX-oeX)/dt);
+					dyVec.push_back(Kd*(eY-oeY)/dt);
+//					panposVec.push_back(yX);
+//					tiltposVec.push_back(yY);
+					targetX.push_back(rX);
+					targetY.push_back(rY);
+				}
 			}
 			else{
-				uXrad = 0;
-				uYrad = 0;
-			}
-			prbscount++;
-			*/
-			//////////////////////////////////
-			uX = uXrad/pRes;
-			uY = uYrad/tRes;
+				ptucmd.x = 0;
+				ptucmd.y = 0;
+				ptucmd.theta = 0;
+				ptucmd_pub_.publish(ptucmd);
 
-			if(abs(uX)<uXmin){
-				if(abs(pixelX-hWidth)>tolerance){//
-					uX = copysign(uXmin,uX);
-				}
-				else uX = 0;
 			}
-			else if(abs(uX>uXmax)){
-				uX = copysign(uXmax,uX);
-			}
-			if(abs(uY)<uYmin){
-				if(abs(pixelY-hHeight)>tolerance){//
-					uY = copysign(uYmin,uY);
-				}
-			else uY = 0;
-			}
-			else if(abs(uY>uYmax)){
-				uY = copysign(uYmax,uY);
-			}
-			ptucmd.x = round(uX); //floor
-			ptucmd.y = round(uY); //floor
-			ptucmd.theta = 0;
-			ptucmd_pub_.publish(ptucmd);
-		}
-		else{
-			ptucmd.x = 0;
-			ptucmd.y = 0;
-			ptucmd.theta = 0;
-			ptucmd_pub_.publish(ptucmd);
 		}
 	}
 	void ptuposCb(const geometry_msgs::Pose2D::ConstPtr& ptupos){
 		yX = ptupos->x * pRes;
 		yY = ptupos->y * tRes;
 		ptuposarrived = true;
+//additional!!!
+		gettimeofday(&t2, NULL);
+		elapsedTime = (t2.tv_sec - t1.tv_sec)*1000;      // sec to ms
+		elapsedTime += (t2.tv_usec - t1.tv_usec)/1000;   // us to ms
+		panposVec.push_back(yX);
+		tiltposVec.push_back(yY);
+		timePosVec.push_back(elapsedTime);
+//additional end!!!
 		if(errorarrived){ 
 			rX = yX + eX;
 			rY = yY + eY;
@@ -191,9 +226,11 @@ public:
 			targetpos.y = rY;
 			targetpos.theta = 0;
 			targetpos_pub_.publish(targetpos);
+
 		}
+//		ROS_INFO("querry");
 // store/write data:
-		if(collectdata){
+/*		if(collectdata){
 			timeVec.push_back(elapsedTime);
 			exVec.push_back(eX);
 			eyVec.push_back(eY);
@@ -208,10 +245,11 @@ public:
 			targetX.push_back(rX);
 			targetY.push_back(rY);
 		}
+*/
 		if(writedata){
 				writedata = false;
 				std::stringstream ss;
-				ss << "SmallTolKp" << Kp << "Ki" << Ki << "Kd" << Kd << "_" <<std::setfill('0')<<std::setw(3)<<
+				ss << "pAtTimedSmallTolStepKp" << Kp << "Ki" << Ki << "Kd" << Kd << "_" <<std::setfill('0')<<std::setw(3)<<
 					filenumber <<".txt";
 				std::string filename = ss.str();
 				myfile.open(filename.c_str());
@@ -232,7 +270,8 @@ public:
 						std::setprecision(8) << panposVec[i] << "," <<
 						std::setprecision(8) << tiltposVec[i] << "," <<
 						std::setprecision(8) << targetX[i] << "," <<
-						std::setprecision(8) << targetY[i] << "\n";
+						std::setprecision(8) << targetY[i] << "," << //"\n";
+						std::setprecision(14) << timePosVec[i] << "\n";
 				}
 				myfile.close();
 				ROS_INFO("Data Written to File\n");
@@ -249,6 +288,8 @@ public:
 				gettimeofday(&t1, NULL);
 				PTUctrl ^= true;
 				collectdata ^= true;
+				errorarrived = false;
+				ptuposarrived = false;
 				if(collectdata){
 					timeVec.clear();
 					exVec.clear();
@@ -263,6 +304,8 @@ public:
 					tiltposVec.clear();
 					targetX.clear();
 					targetY.clear();
+					// additional!!
+					timePosVec.clear();
 				}
 				eX = 0, eY = 0, oeX = 0; oeY = 0, ieX=0, ieY=0;
 				firstloop = true;
@@ -310,6 +353,7 @@ public:
 				//prbscount = 0;
 				PTUctrl = false;
 				firstloop = true;
+				collectdata = false;
 				break;
 			case 27:
 				ROS_INFO("Shutdown\n");
@@ -320,7 +364,7 @@ public:
 };
 
 int main(int argc, char **argv){
-// load specific input signal
+// load or produce specific input signals
 /*
 	std::string line;
 	std::string::size_type sz;     // alias of size_t
@@ -339,6 +383,72 @@ int main(int argc, char **argv){
 	}
 */
 
+/*	for (int i = 0; i<10; i++){
+		uprbs.push_back(0);
+	}
+	uprbs.push_back(10000);
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0);
+	}
+*/
+
+/*
+	double uspeed = 30;
+	for (int j = 3; j<11; j++){
+		uspeed = j*0.05;
+		for (int i = 0; i<10; i++) uprbs.push_back(0.0);
+		for (int i = 0; i<20; i++) uprbs.push_back(uspeed);
+		for (int i = 0; i<10; i++) uprbs.push_back(0.0);
+		for (int i = 0; i<20; i++) uprbs.push_back(-uspeed);
+		for (int i = 0; i<10; i++) uprbs.push_back(0.0);
+		for (int i = 0; i<20; i++) uprbs.push_back(uspeed);
+		for (int i = 0; i<20; i++) uprbs.push_back(-uspeed);
+	}
+*/
+
+/*
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+	for(int i=0;i<30;i++){
+		uspeed+=0.1;
+		if(uspeed>0.5)uspeed=0.5;
+		uprbs.push_back(uspeed);
+	}
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+	for(int i=0;i<30;i++){
+		uprbs.push_back(-0.55);
+	}
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+	for(int i=0;i<30;i++){
+		uprbs.push_back(0.3);
+	}
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+	for(int i=0;i<30;i++){
+		uprbs.push_back(-0.3);
+	}
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+	for(int i=0;i<30;i++){
+		uprbs.push_back(0.1);
+	}
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+	for(int i=0;i<30;i++){
+		uprbs.push_back(-0.1);
+	}
+	for (int i = 0; i<10; i++){
+		uprbs.push_back(0.0);
+	}
+*/
 	ros::init(argc,argv,"controller_node");
 	ControlAndMap cm;
 	ros::spin();
