@@ -17,11 +17,11 @@ receives waitkey and serves as interface for setting the PID, writing data etc.
 #include <fstream>
 #include <iomanip>
 #include <vector>
-
+#include <algorithm>
 
 //Specific input signal
-std::vector<double> uprbs;
-int prbscount = 0;
+std::vector<double> uspec;
+int speccount = 0;
 
 
 class ControlAndMap{
@@ -46,12 +46,14 @@ bool firstloop = true;
 bool PTUctrl = false;
 double alphaX = 0.079555; // correction  by measurements 1.055
 double alphaY = 0.044814; // correction  by measurements 1.021
-double pRes = 46.2857 / 3600 * M_PI / 180;
-double tRes = 11.5714 / 3600 * M_PI / 180;
+double pRes = 92.5714 / 3600 * M_PI / 180;
+double tRes = 46.2857 / 3600 * M_PI / 180;
 double hWidth = 320;
 double hHeight = 180;
-int uXmax= 10000, uXmin = 60;		// pos/second
-int uYmax =10000, uYmin = 240;		// pos/second
+int uXmax= 5000, uXmin = 60;		// pan input limits pos/second
+int uYmax =2500, uYmin = 60;		// tilt input limits pos/second
+int deltaUXmax = 400;				// pan input rate limit pos/Ts
+int deltaUYmax = 800;				// tilt input rate limit pos/Ts
 double tolerance = 3;				// pixel		(other approach:0.00244; // rad)
 
 std::vector<double> timeVec;
@@ -91,6 +93,8 @@ uXrad = 0,				// input pan in rad/second
 uYrad = 0,				// input tilt in rad/second
 uX = 0,					// input pan in ptu positions/second
 uY = 0,					// input tilt in ptu positions/second
+uXold = 0,				// old input tilt in ptu positions/second
+uYold = 0,				// old input tilt in ptu positions/second
 dt = 0.033,				// time step
 Kp = 0, Ki = 0, Kd = 0;	// gains
 public:
@@ -112,6 +116,9 @@ public:
 			oeY = eY;
 			eX = -alphaX * (double)(pixelX - hWidth) / (double)hWidth;
 			eY = -alphaY * (double)(pixelY - hHeight) / (double)hHeight;
+
+
+
 			// update and publish target position if all information has arrvied
 			errorarrived = true;
 			if(ptuposarrived){ 
@@ -124,6 +131,21 @@ public:
 				targetpos_pub_.publish(targetpos);
 			}
 			if(PTUctrl){
+				/*
+				//specific error signal
+				pixelX = hWidth;
+				pixelY = hHeight;
+				if(speccount<uspec.size()){
+					eX = uspec[speccount];
+					eY = 0;//uspec[speccount];
+				}
+				else{
+					eX = 0;
+					eY = 0;
+				}
+
+				speccount++;
+				*/
 				gettimeofday(&t2, NULL);
 				elapsedTime = (t2.tv_sec - t1.tv_sec)*1000;      // sec to ms
 				elapsedTime += (t2.tv_usec - t1.tv_usec)/1000;   // us to ms
@@ -140,23 +162,58 @@ public:
 				//////////////////////////////////
 				//specific input signal
 /*		
-				if(prbscount<uprbs.size()){
-					uXrad = uprbs[prbscount];
-					uYrad = uprbs[prbscount];
+				if(speccount<uspec.size()){
+					uXrad = uspec[speccount];
+					uYrad = uspec[speccount];
 				}
 				else{
 					uXrad = 0;
 					uYrad = 0;
 				}
-				prbscount++;
-*/			
+				speccount++;
+*/
 				//////////////////////////////////
 
 				uX = uXrad/pRes;
 				uY = uYrad/tRes;
-			
 
+				// Specific positions per second:
+/*
+				if(speccount<uspec.size()){
+					uX = uspec[speccount];
+					uY = 0;//uspec[speccount];
+				}
+				else{
+					uX = 0;
+					uY = 0;
+				}				
+				speccount++;
+*/
+				// input rate limit:
+				if(abs(uX-uXold)>deltaUXmax){
+					if(uX>uXold) uX = uXold + deltaUXmax;
+					else uX = uXold - deltaUXmax;
+					// correct small velocities (otherwise speed would be increased again
+					if(abs(uX)<uXmin){
+						if(abs(pixelX-hWidth)>tolerance){//
+							uX = copysign(uXmin,uXold);
+						}
+						else uX = 0;
+					}					
+				}
+				if(abs(uY-uYold)>deltaUYmax){
+					if(uY>uYold) uY = uYold + deltaUYmax;
+					else uY = uYold - deltaUYmax;
+					// correct small velocities (otherwise speed would be increased again
+					if(abs(uY)<uYmin){
+						if(abs(pixelY-hHeight)>tolerance){//
+							uY = copysign(uYmin,uYold);
+						}
+					else uY = 0;
+					}
+				}					
 
+				// input limits:
 				if(abs(uX)<uXmin){
 					if(abs(pixelX-hWidth)>tolerance){//
 						uX = copysign(uXmin,uX);
@@ -176,6 +233,8 @@ public:
 					uY = copysign(uYmax,uY);
 				}
 
+
+
 				ptucmd.x = round(uX); //floor
 				ptucmd.y = round(uY); //floor
 				ptucmd.theta = 0;
@@ -185,8 +244,8 @@ public:
 					timeVec.push_back(elapsedTime);
 					exVec.push_back(eX);
 					eyVec.push_back(eY);
-					uxVec.push_back(uX*pRes);
-					uyVec.push_back(uY*tRes);
+					uxVec.push_back(uX);
+					uyVec.push_back(uY);
 					ixVec.push_back(ieX*Ki);
 					iyVec.push_back(ieY*Ki);
 					dxVec.push_back(Kd*(eX-oeX)/dt);
@@ -196,8 +255,22 @@ public:
 					targetX.push_back(rX);
 					targetY.push_back(rY);
 				}
+			uXold = uX;
+			uYold = uY;
 			}
 			else{
+				// input rate limit:
+				if(abs(uX)>deltaUXmax){
+					if(uX>0) uX = uXold - deltaUXmax;
+					else uX = uXold + deltaUXmax;
+				}
+				else uX = 0;
+				if(abs(uY)>deltaUYmax){
+					if(uY>0) uY = uYold - deltaUYmax;
+					else uY = uYold + deltaUYmax;
+				}
+				else uY = 0;
+				// send ptucmd
 				ptucmd.x = 0;
 				ptucmd.y = 0;
 				ptucmd.theta = 0;
@@ -207,8 +280,8 @@ public:
 		}
 	}
 	void ptuposCb(const geometry_msgs::Pose2D::ConstPtr& ptupos){
-		yX = ptupos->x * pRes;
-		yY = ptupos->y * tRes;
+		yX = ptupos->x; // * pRes;
+		yY = ptupos->y; //* tRes;
 		ptuposarrived = true;
 //additional!!!
 		gettimeofday(&t2, NULL);
@@ -307,7 +380,7 @@ public:
 					// additional!!
 					timePosVec.clear();
 				}
-				eX = 0, eY = 0, oeX = 0; oeY = 0, ieX=0, ieY=0;
+				eX = 0, eY = 0, oeX = 0; oeY = 0, ieX=0, ieY=0;// uXold = 0, uYold = 0;
 				firstloop = true;
 				if(PTUctrl) ROS_INFO("\n!!PTUctrl is ON!!\n");
 				else ROS_INFO("\n!!PTUctrl is OFF!!\n");
@@ -350,7 +423,7 @@ public:
 				break;
 			case 114: // r: rehome PTU
 				ROS_INFO("Rehome PTU\n");
-				//prbscount = 0;
+				//speccount = 0;
 				PTUctrl = false;
 				firstloop = true;
 				collectdata = false;
@@ -368,12 +441,12 @@ int main(int argc, char **argv){
 /*
 	std::string line;
 	std::string::size_type sz;     // alias of size_t
-	std::ifstream prbsfile ("/home/guetgf/catkin_ws/src/subscribetoimage/src/u_panprbs.txt");
+	std::ifstream prbsfile ("/home/guetgf/catkin_ws/src/subscribetoimage/src/uprbsMw0_005.txt");
 	if (prbsfile.is_open())
 	{
 	while ( std::getline (prbsfile,line) )
 	{
-	  uprbs.push_back(std::stod(line,&sz));
+	  uspec.push_back(std::stod(line,&sz));
 	}
 	prbsfile.close();
 	}
@@ -384,69 +457,106 @@ int main(int argc, char **argv){
 */
 
 /*	for (int i = 0; i<10; i++){
-		uprbs.push_back(0);
+		uspec.push_back(0);
 	}
-	uprbs.push_back(10000);
+	uspec.push_back(10000);
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0);
+		uspec.push_back(0);
 	}
 */
 
 /*
-	double uspeed = 30;
-	for (int j = 3; j<11; j++){
+	double uspeed = 0;
+	for (int j = 0; j<11; j++){
 		uspeed = j*0.05;
-		for (int i = 0; i<10; i++) uprbs.push_back(0.0);
-		for (int i = 0; i<20; i++) uprbs.push_back(uspeed);
-		for (int i = 0; i<10; i++) uprbs.push_back(0.0);
-		for (int i = 0; i<20; i++) uprbs.push_back(-uspeed);
-		for (int i = 0; i<10; i++) uprbs.push_back(0.0);
-		for (int i = 0; i<20; i++) uprbs.push_back(uspeed);
-		for (int i = 0; i<20; i++) uprbs.push_back(-uspeed);
+		for (int i = 0; i<10; i++) uspec.push_back(0.0);
+		for (int i = 0; i<20; i++) uspec.push_back(uspeed);
+		for (int i = 0; i<10; i++) uspec.push_back(0.0);
+		for (int i = 0; i<20; i++) uspec.push_back(-uspeed);
+		for (int i = 0; i<10; i++) uspec.push_back(0.0);
+		for (int i = 0; i<20; i++) uspec.push_back(uspeed);
+		for (int i = 0; i<20; i++) uspec.push_back(-uspeed);
+	}
+*/
+
+//Sinusoidal
+/*
+	double N = 512;
+	double A = 0.1;
+
+	int n1 = 0;
+		for (int m=1; m<=4; m++){
+			for(double j = 0;j<N;j++){
+			 	uspec.push_back(A*sin(j*pow(2.0,(n1+1))*M_PI/N));
+			}
+		}
+*/
+/*
+for (int i = 0; i<30;i++){
+	uspec.push_back(180+i);
+}
+for (int i = 0; i<30;i++){
+	uspec.push_back(210-i);
+}
+*/
+/*
+	int n2 =1;
+		for (int m=1; m<=2; m++){
+			for(double j = 0;j<N;j++){
+			 	uspec.push_back(A*cos(j*pow(2.0,(n2+1))*M_PI/N));
+			}
+		}
+
+	for(int n = 3; n<=8; n++){					
+		for (int m = 1; m<5;m++)
+			for(double j = 0;j<N;j++){
+		 		uspec.push_back(A*cos(j*pow(2.0,(n+1))*M_PI/N));
+			}
+		}
 	}
 */
 
 /*
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 	for(int i=0;i<30;i++){
 		uspeed+=0.1;
 		if(uspeed>0.5)uspeed=0.5;
-		uprbs.push_back(uspeed);
+		uspec.push_back(uspeed);
 	}
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 	for(int i=0;i<30;i++){
-		uprbs.push_back(-0.55);
+		uspec.push_back(-0.55);
 	}
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 	for(int i=0;i<30;i++){
-		uprbs.push_back(0.3);
+		uspec.push_back(0.3);
 	}
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 	for(int i=0;i<30;i++){
-		uprbs.push_back(-0.3);
+		uspec.push_back(-0.3);
 	}
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 	for(int i=0;i<30;i++){
-		uprbs.push_back(0.1);
+		uspec.push_back(0.1);
 	}
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 	for(int i=0;i<30;i++){
-		uprbs.push_back(-0.1);
+		uspec.push_back(-0.1);
 	}
 	for (int i = 0; i<10; i++){
-		uprbs.push_back(0.0);
+		uspec.push_back(0.0);
 	}
 */
 	ros::init(argc,argv,"controller_node");
