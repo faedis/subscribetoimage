@@ -38,7 +38,7 @@ private:
 
 	geometry_msgs::Pose2D ptupos;
 
-	signed short int panSpeed, tiltSpeed, rehomespeed = 2000, panZero = 0, tiltZero=0;
+	signed short int panSpeed, tiltSpeed, rehomespeed = 500, panZero = 0, tiltZero=0;
 	signed short pPos = 0;
 	signed short tPos = 0;
 	signed short* pPtr = &pPos;
@@ -133,19 +133,19 @@ int main( int argc, char** argv ) {
 	//wta/wpa is automatic step mode and leads to resolution of
 	// 46.2857 rsp 11.5714 arc sec pp, tmr is tilt regular move power
 	if (firstUse) {
-		if (SerialStringOut(COMstream, (unsigned char *)"TMR WTA WPA ") != TRUE) {
+		if (SerialStringOut(COMstream, (unsigned char *)"TMH PMH WTH WPQ ") != TRUE) {
 			cout << "1st Serial command not sent to PTU \n";
 			getchar();
 		}
-		// tilt reg move power, tilt min pos, t max pos, p m pos,
-		// p x pos, user limits enabled, disable reset on restart,
-		//t acc, p acc, p upper speed limit, t u s l
-		if (SerialStringOut(COMstream, (unsigned char *)"TMH PMH TNU-1000 TXU9000 PNU-3000 PXU3000 LU RD TA200000 PA50000 PU10000 TU10000 ") != TRUE) {
-			cout << "2nd Serial command not sent to PTU \n";
-		}
 		cout << "Wait until PTU has stopped and then enter a key! \n";
 		int dummyvar = 0;
-		cin>>dummyvar;
+		cin>>dummyvar;		// tilt reg move power, tilt min pos, t max pos, p m pos,
+		// p x pos, user limits enabled, disable reset on restart,
+		//t acc, p acc, p upper speed limit, t u s l
+		if (SerialStringOut(COMstream, (unsigned char *)"TML PML TNU-300 TXU2250 PNU-2000 PXU2000 LU RD TA100000 PA50000 PU5000 TU2500 ") != TRUE) { //TA50000 PA25000
+			cout << "2nd Serial command not sent to PTU \n";
+		}
+
 		reset_PTU_parser(2000); // needed for changing between direct serial comm and cpi commands
 								// set pure velocity mode
 		if (set_mode(SPEED_CONTROL_MODE, PTU_PURE_VELOCITY_SPEED_CONTROL_MODE) == PTU_OK) {
@@ -166,13 +166,13 @@ int main( int argc, char** argv ) {
 		if (maxPos == 0) {
 			cout << "could not set or receive min tilt position limit, extremumpos:  \n" << maxPos;
 		}
-		// lower base speed:
-		// set base speed to 200 (minimum is 57/58)
-		signed short int val = 58; // ^= 5deg/sec pan; 2.5deg/sec tilt base speed
+		//  base speed:
+		
+		signed short int val = 58; 
 		if (set_desired(PAN, BASE, (PTU_PARM_PTR *)&val, ABSOLUTE) != PTU_OK) {
 			cout << "Pan base speed could not be set \n";
 		}
-		val = 4 * val;
+		val = val;
 		if (set_desired(TILT, BASE, (PTU_PARM_PTR *)&val, ABSOLUTE) != PTU_OK) {
 			cout << "Tilt base speed could not be set \n";
 		}
